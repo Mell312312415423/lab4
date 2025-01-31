@@ -2,101 +2,98 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from dotenv import load_dotenv
 import os
 
+# Load environment variables
 load_dotenv()
 
 app = FastAPI()
 
-######################## API Key from .env file
-API_KEY = os.getenv("API_KEY")
+# Retrieve API Key from environment variables
+API_SECRET_KEY = os.getenv("API_KEY")
 
-######################## Dependency to verify API Key
-def verify_api_key(request: Request):
-    api_key = request.headers.get("X-API-KEY") or request.query_params.get("api_key")
-    if not api_key:
-        raise HTTPException(status_code=401, detail="Invalid API Key: Missing API Key")
-    if api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-    return api_key
+# API Key Verification Dependency
+def authenticate_api_key(request: Request):
+    provided_key = request.headers.get("X-API-KEY") or request.query_params.get("api_key")
+    if not provided_key or provided_key != API_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+    return provided_key
 
-######################## Common Task Handling Functionality
-def get_task_by_id(task_id: int, task_db: list):
-    return next((task for task in task_db if task["task_id"] == task_id), None)
+# Task Management Helper Functions
+def find_task_by_id(task_list: list, task_id: int):
+    return next((task for task in task_list if task["task_id"] == task_id), None)
 
-def create_task(task_db: list, task_title: str, task_desc: str):
-    new_task = {"task_id": len(task_db) + 1, "task_title": task_title, "task_desc": task_desc, "is_finished": False}
-    task_db.append(new_task)
+def add_task(task_list: list, title: str, description: str):
+    new_task = {
+        "task_id": len(task_list) + 1,
+        "title": title,
+        "description": description,
+        "completed": False,
+    }
+    task_list.append(new_task)
     return new_task
 
-def delete_task(task_db: list, task_id: int):
-    task = get_task_by_id(task_id, task_db)
+def remove_task(task_list: list, task_id: int):
+    task = find_task_by_id(task_list, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    task_db.remove(task)
-    return {"status": "ok", "message": "Task deleted successfully"}
+    task_list.remove(task)
+    return {"message": "Task deleted successfully"}
 
-def update_task(task_db: list, task_id: int, task_title: str = None, task_desc: str = None, is_finished: bool = None):
-    task = get_task_by_id(task_id, task_db)
+def modify_task(task_list: list, task_id: int, title: str = None, description: str = None, completed: bool = None):
+    task = find_task_by_id(task_list, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task_title is not None:
-        task["task_title"] = task_title
-    if task_desc is not None:
-        task["task_desc"] = task_desc
-    if is_finished is not None:
-        task["is_finished"] = is_finished
-    return {"status": "ok", "task": task}
+    if title is not None:
+        task["title"] = title
+    if description is not None:
+        task["description"] = description
+    if completed is not None:
+        task["completed"] = completed
+    return {"message": "Task updated successfully", "task": task}
 
-######################## Database for v1 and v2
-task_db_v1 = [
-    {"task_id": 1, "task_title": "Test 1", "task_desc": "Complete FastAPI basics", "is_finished": False}
-]
+# Sample Task Data Stores
+task_store_v1 = [{"task_id": 1, "title": "Learn FastAPI", "description": "Understand the basics", "completed": False}]
+task_store_v2 = [{"task_id": 1, "title": "Upgrade API", "description": "Refactor to improve structure", "completed": False}]
 
-task_db_v2 = [
-    {"task_id": 1, "task_title": "Test 2", "task_desc": "Revise To-Do API", "is_finished": False}
-]
-
-######################## API v1
-@app.get("/apiv1/", dependencies=[Depends(verify_api_key)])
-def apiv1_root():
+# API v1 Endpoints
+@app.get("/apiv1/", dependencies=[Depends(authenticate_api_key)])
+def api_v1_home():
     return {"message": "Welcome to API v1"}
 
-@app.get("/apiv1/tasks/{task_id}", dependencies=[Depends(verify_api_key)])
-def get_task_v1(task_id: int):
-    task = get_task_by_id(task_id, task_db_v1)
+@app.get("/apiv1/tasks/{task_id}", dependencies=[Depends(authenticate_api_key)])
+def fetch_task_v1(task_id: int):
+    task = find_task_by_id(task_store_v1, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"status": "ok", "task": task}
+    return {"task": task}
 
-@app.post("/apiv1/tasks/", status_code=201)
-def create_task_v1(task_title: str, task_desc: str, api_key: str = Depends(verify_api_key)):
-    new_task = create_task(task_db_v1, task_title, task_desc)
-    return {"status": "ok", "task": new_task}
+@app.post("/apiv1/tasks/", status_code=201, dependencies=[Depends(authenticate_api_key)])
+def add_task_v1(title: str, description: str):
+    return {"task": add_task(task_store_v1, title, description)}
 
-@app.delete("/apiv1/tasks/{task_id}", status_code=204, dependencies=[Depends(verify_api_key)])
-def delete_task_v1(task_id: int):
-    return delete_task(task_db_v1, task_id)
+@app.delete("/apiv1/tasks/{task_id}", status_code=204, dependencies=[Depends(authenticate_api_key)])
+def remove_task_v1(task_id: int):
+    return remove_task(task_store_v1, task_id)
 
-@app.patch("/apiv1/tasks/{task_id}", status_code=204, dependencies=[Depends(verify_api_key)])
-def update_task_v1(task_id: int, task_title: str = None, task_desc: str = None, is_finished: bool = None):
-    return update_task(task_db_v1, task_id, task_title, task_desc, is_finished)
+@app.patch("/apiv1/tasks/{task_id}", status_code=200, dependencies=[Depends(authenticate_api_key)])
+def modify_task_v1(task_id: int, title: str = None, description: str = None, completed: bool = None):
+    return modify_task(task_store_v1, task_id, title, description, completed)
 
-######################## API v2
-@app.get("/apiv2/tasks/{task_id}", dependencies=[Depends(verify_api_key)])
-def get_task_v2(task_id: int):
-    task = get_task_by_id(task_id, task_db_v2)
+# API v2 Endpoints
+@app.get("/apiv2/tasks/{task_id}", dependencies=[Depends(authenticate_api_key)])
+def fetch_task_v2(task_id: int):
+    task = find_task_by_id(task_store_v2, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"status": "ok", "task": task}
+    return {"task": task}
 
-@app.post("/apiv2/tasks/", status_code=201, dependencies=[Depends(verify_api_key)])
-def create_task_v2(task_title: str, task_desc: str):
-    new_task = create_task(task_db_v2, task_title, task_desc)
-    return {"status": "ok", "task": new_task}
+@app.post("/apiv2/tasks/", status_code=201, dependencies=[Depends(authenticate_api_key)])
+def add_task_v2(title: str, description: str):
+    return {"task": add_task(task_store_v2, title, description)}
 
-@app.delete("/apiv2/tasks/{task_id}", status_code=204, dependencies=[Depends(verify_api_key)])
-def delete_task_v2(task_id: int):
-    return delete_task(task_db_v2, task_id)
+@app.delete("/apiv2/tasks/{task_id}", status_code=204, dependencies=[Depends(authenticate_api_key)])
+def remove_task_v2(task_id: int):
+    return remove_task(task_store_v2, task_id)
 
-@app.patch("/apiv2/tasks/{task_id}", status_code=204, dependencies=[Depends(verify_api_key)])
-def update_task_v2(task_id: int, task_title: str = None, task_desc: str = None, is_finished: bool = None):
-    return update_task(task_db_v2, task_id, task_title, task_desc, is_finished)
+@app.patch("/apiv2/tasks/{task_id}", status_code=200, dependencies=[Depends(authenticate_api_key)])
+def modify_task_v2(task_id: int, title: str = None, description: str = None, completed: bool = None):
+    return modify_task(task_store_v2, task_id, title, description, completed)
